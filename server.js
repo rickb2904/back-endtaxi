@@ -64,6 +64,25 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
+
+// Route pour récupérer les taxis disponibles
+app.get('/api/taxis', async (req, res) => {
+    try {
+        // Requête SQL pour récupérer les taxis disponibles
+        const result = await pool.query(`
+            SELECT "User".id, "User".nom, "User".prenom, "User".latitude, "User".longitude
+            FROM "User"
+            INNER JOIN Chauffeur ON "User".id = Chauffeur.user_id
+            WHERE Chauffeur.disponibilite = TRUE
+        `);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Erreur lors de la récupération des taxis.' });
+    }
+});
+
+
 // Route de connexion
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
