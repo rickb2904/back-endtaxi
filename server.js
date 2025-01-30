@@ -25,21 +25,11 @@ const pool = new Pool({
 // Clé secrète JWT
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware pour vérifier les tokens
+// Middleware pour vérifier les tokens (désactivé temporairement)
 function authenticateToken(req, res, next) {
-    const token = req.headers['authorization'];
-    if (!token) {
-        return res.status(401).json({ message: 'Token manquant.' });
-    }
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-        next();
-    } catch (error) {
-        return res.status(403).json({ message: 'Token invalide.' });
-    }
+    console.warn('Attention : la vérification des tokens est désactivée.');
+    next(); // Laisser passer toutes les requêtes
 }
-
 
 app.post('/api/register', async (req, res) => {
     const { nom, prenom, email, mot_de_passe, role, telephone, adresse } = req.body;
@@ -60,10 +50,10 @@ app.post('/api/register', async (req, res) => {
 
         // Insérer l'utilisateur dans la base de données
         const query = `
-      INSERT INTO "User" (nom, prenom, email, mot_de_passe, role, telephone, adresse)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, nom, prenom, email, role;
-    `;
+            INSERT INTO "User" (nom, prenom, email, mot_de_passe, role, telephone, adresse)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, nom, prenom, email, role;
+        `;
         const values = [nom, prenom, email, hashedPassword, role, telephone, adresse];
         const result = await pool.query(query, values);
 
@@ -73,7 +63,6 @@ app.post('/api/register', async (req, res) => {
         res.status(500).json({ message: 'Erreur lors de l\'inscription.' });
     }
 });
-
 
 // Route de connexion
 app.post('/api/login', async (req, res) => {
@@ -111,13 +100,13 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// Exemple de route protégée
-app.get('/api/protected', authenticateToken, (req, res) => {
-    res.status(200).json({ message: `Bonjour, utilisateur ${req.user.email}. Vous êtes authentifié.` });
+// Exemple de route protégée (désactivation de la vérification des tokens)
+app.get('/api/protected', (req, res) => {
+    res.status(200).json({ message: `Bonjour, utilisateur. Vous êtes authentifié.` });
 });
 
-// Route pour récupérer les utilisateurs
-app.get('/api/users', authenticateToken, async (req, res) => {
+// Route pour récupérer les utilisateurs (désactivation de la vérification des tokens)
+app.get('/api/users', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM "User"');
         res.status(200).json(result.rows);
@@ -126,8 +115,6 @@ app.get('/api/users', authenticateToken, async (req, res) => {
         res.status(500).json({ message: 'Erreur lors de la récupération des utilisateurs.' });
     }
 });
-
-// Autres routes (exemple : /api/drivers, /api/location) ici ...
 
 // Middleware global pour les erreurs
 app.use((err, req, res, next) => {
