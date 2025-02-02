@@ -537,6 +537,44 @@ app.post('/api/calculate-price', (req, res) => {
     }
 });
 
+// ------------------
+// Route pour récupérer les réservations d’un utilisateur (protégée)
+// ------------------
+app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
+    try {
+        // 1) Récupère l'ID demandé dans l'URL
+        const userIdFromParams = parseInt(req.params.id, 10);
+
+        // 2) Récupère l'ID du token (défini dans authenticateToken -> req.user)
+        const userIdFromToken = req.user.id;
+
+        // 3) Vérifier que l'utilisateur connecté ne cherche pas à voir
+        //    les réservations d'un autre (à moins que ce soit un admin)
+        if (userIdFromParams !== userIdFromToken && req.user.role !== 'admin') {
+            return res.status(403).json({
+                message: 'Accès refusé. Vous ne pouvez consulter que vos propres réservations.'
+            });
+        }
+
+        // 4) Requête SQL pour récupérer les réservations de la table "Reservation"
+        //    qui appartiennent au user (id_utilisateur)
+        const result = await pool.query(`
+          SELECT *
+          FROM "Reservation"
+          WHERE id_utilisateur = $1
+          ORDER BY date_creation DESC
+        `, [userIdFromParams]);
+
+        // Retourne le tableau des réservations
+        return res.status(200).json(result.rows);
+
+    } catch (error) {
+        console.error('Erreur lors de la récupération des réservations :', error);
+        res.status(500).json({
+            message: 'Erreur lors de la récupération des réservations.'
+        });
+    }
+});
 
 // ------------------
 // Middleware global pour les erreurs
