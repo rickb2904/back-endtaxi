@@ -269,17 +269,22 @@ function authenticateToken(req, res, next) {
 // Route d’inscription (register)
 // ------------------
 app.post('/api/register', async (req, res) => {
-    const { nom, prenom, email, mot_de_passe, role, telephone, adresse } = req.body;
+    // On ne récupère pas `role` depuis req.body
+    const { nom, prenom, email, mot_de_passe, telephone, adresse } = req.body;
 
-    if (!nom || !prenom || !email || !mot_de_passe || !role) {
-        return res
-            .status(400)
-            .json({ message: 'Tous les champs obligatoires doivent être remplis.' });
+    // Vérification de base
+    if (!nom || !prenom || !email || !mot_de_passe) {
+        return res.status(400).json({
+            message: 'Tous les champs obligatoires doivent être remplis.'
+        });
     }
 
     try {
         // Vérifier si l'email existe déjà
-        const existingUser = await pool.query('SELECT * FROM "User" WHERE email = $1', [email]);
+        const existingUser = await pool.query(
+            'SELECT * FROM "User" WHERE email = $1',
+            [email]
+        );
         if (existingUser.rows.length > 0) {
             return res.status(409).json({ message: 'Cet email est déjà utilisé.' });
         }
@@ -287,13 +292,15 @@ app.post('/api/register', async (req, res) => {
         // Hacher le mot de passe
         const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
 
-        // Insérer l'utilisateur
+        // Insérer l'utilisateur avec role = 'client'
         const query = `
-      INSERT INTO "User" (nom, prenom, email, mot_de_passe, role, telephone, adresse)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, nom, prenom, email, role;
-    `;
-        const values = [nom, prenom, email, hashedPassword, role, telephone, adresse];
+            INSERT INTO "User"
+                (nom, prenom, email, mot_de_passe, role, telephone, adresse)
+            VALUES
+                ($1, $2, $3, $4, 'client', $5, $6)
+                RETURNING id, nom, prenom, email, role;
+        `;
+        const values = [nom, prenom, email, hashedPassword, telephone, adresse];
         const result = await pool.query(query, values);
 
         res.status(201).json({
@@ -307,6 +314,7 @@ app.post('/api/register', async (req, res) => {
         });
     }
 });
+
 
 // ------------------
 // Route pour récupérer les taxis disponibles
@@ -335,9 +343,7 @@ app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-        return res
-            .status(400)
-            .json({ message: 'Email et mot de passe requis.' });
+        return res.status(400).json({ message: 'Email et mot de passe requis.' });
     }
 
     try {
@@ -366,6 +372,7 @@ app.post('/api/login', async (req, res) => {
             { expiresIn: '1h' }
         );
 
+        // On renvoie également le nom, prénom et la photo_de_profil
         res.status(200).json({
             token,
             user: {
@@ -374,6 +381,7 @@ app.post('/api/login', async (req, res) => {
                 nom: user.nom,
                 prenom: user.prenom,
                 role: user.role,
+                photo_de_profil: user.photo_de_profil // <-- Assure-toi que ce champ existe dans ta table
             },
         });
     } catch (error) {
@@ -384,16 +392,6 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// ------------------
-// Exemple de route protégée
-// ------------------
-app.get('/api/protected', authenticateToken, (req, res) => {
-    // Si on arrive là, c'est que le token est valide
-    res.status(200).json({
-        message: `Bonjour, ${req.user.email}! Votre token est valide.`,
-        user: req.user,
-    });
-});
 
 // ------------------
 // Route "mot de passe oublié"
@@ -439,39 +437,6 @@ app.post('/api/forgot-password', async (req, res) => {
     }
 });
 
-
-// ------------------
-// Route "réinitialisation du mot de passe"
-// ------------------
-app.post('/api/reset-password', async (req, res) => {
-    const { token, newPassword } = req.body;
-
-    if (!token || !newPassword) {
-        return res.status(400).json({ message: 'Token et mot de passe requis.' });
-    }
-
-    try {
-        // Vérifier le token
-        const decoded = jwt.verify(token, JWT_SECRET);
-
-        // Hacher le nouveau mot de passe
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-        // Mettre à jour le mot de passe dans la base
-        await pool.query(`UPDATE "User" SET mot_de_passe = $1 WHERE id = $2`, [
-            hashedPassword,
-            decoded.id,
-        ]);
-
-        res.status(200).json({ message: 'Mot de passe réinitialisé avec succès.' });
-    } catch (error) {
-        console.error(error);
-        if (error.name === 'TokenExpiredError') {
-            return res.status(400).json({ message: 'Token expiré.' });
-        }
-        res.status(500).json({ message: 'Erreur lors de la réinitialisation du mot de passe.' });
-    }
-});
 // ------------------
 // Route pour récupérer les utilisateurs (ex, on peut protéger si besoin)
 // ------------------
@@ -537,37 +502,83 @@ app.post('/api/calculate-price', (req, res) => {
     }
 });
 
-// ------------------
-// Route pour récupérer les réservations d’un utilisateur (protégée)
-// ------------------
+// ------------------------------------------------
+//  Route POST /api/reservations
+//  Insère une réservation dans la table "Reservation"
+// ------------------------------------------------
+app.post('/api/reservations', authenticateToken, async (req, res) => {
+    // On récupère les champs depuis le body
+    const {
+        id_utilisateur,
+        id_taxi,
+        depart,
+        arrivee,
+        distance,
+        prix,
+        statut,
+        date_prise_en_charge
+    } = req.body;
+
+    // Vérification des champs obligatoires
+    if (!id_utilisateur || !id_taxi || !depart || !arrivee || !distance || !prix) {
+        return res.status(400).json({
+            message: 'Données incomplètes pour la réservation.'
+        });
+    }
+
+    try {
+        // Insertion dans la table "Reservation"
+        // IMPORTANT: Assure-toi que la table est bien nommée "Reservation" (avec la majuscule et les guillemets)
+        // et que ces colonnes existent : id_utilisateur, id_taxi, depart, arrivee, distance, prix, statut, date_prise_en_charge
+        const result = await pool.query(`
+      INSERT INTO "reservation" 
+      (id_utilisateur, id_taxi, depart, arrivee, distance, prix, statut, date_prise_en_charge)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `, [
+            id_utilisateur,
+            id_taxi,
+            depart,
+            arrivee,
+            distance,
+            prix,
+            statut,
+            date_prise_en_charge
+        ]);
+
+        // Retour d’un code 201 et de la réservation créée
+        return res.status(201).json({
+            message: 'Réservation enregistrée avec succès.',
+            reservation: result.rows[0]
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({
+            message: 'Erreur lors de la réservation.'
+        });
+    }
+});
+// Route GET /api/users/:id/reservations
 app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
     try {
-        // 1) Récupère l'ID demandé dans l'URL
         const userIdFromParams = parseInt(req.params.id, 10);
-
-        // 2) Récupère l'ID du token (défini dans authenticateToken -> req.user)
         const userIdFromToken = req.user.id;
 
-        // 3) Vérifier que l'utilisateur connecté ne cherche pas à voir
-        //    les réservations d'un autre (à moins que ce soit un admin)
+        // Vérification : l’utilisateur doit être soit l'admin, soit le même user
         if (userIdFromParams !== userIdFromToken && req.user.role !== 'admin') {
             return res.status(403).json({
                 message: 'Accès refusé. Vous ne pouvez consulter que vos propres réservations.'
             });
         }
 
-        // 4) Requête SQL pour récupérer les réservations de la table "Reservation"
-        //    qui appartiennent au user (id_utilisateur)
         const result = await pool.query(`
-          SELECT *
-          FROM "Reservation"
-          WHERE id_utilisateur = $1
-          ORDER BY date_creation DESC
-        `, [userIdFromParams]);
+      SELECT *
+      FROM "reservation"
+      WHERE id_utilisateur = $1
+      ORDER BY date_creation DESC
+    `, [userIdFromParams]);
 
-        // Retourne le tableau des réservations
         return res.status(200).json(result.rows);
-
     } catch (error) {
         console.error('Erreur lors de la récupération des réservations :', error);
         res.status(500).json({
@@ -575,6 +586,183 @@ app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
         });
     }
 });
+
+// GET /api/me
+app.get('/api/me', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id; // Récupération de l'ID depuis le token
+
+        // Récupération de l'utilisateur
+        const result = await pool.query(`
+            SELECT *
+            FROM "User"
+            WHERE id = $1
+        `, [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé.' });
+        }
+
+        const user = result.rows[0];
+
+        // Fallback si photo_de_profil est NULL => renvoie null
+        const photoProfil = user.photo_de_profil || null;
+
+        // Réponse JSON (sans l'historique)
+        return res.status(200).json({
+            id: user.id,
+            nom: user.nom,
+            prenom: user.prenom,
+            email: user.email,
+            telephone: user.telephone,
+            adresse: user.adresse,
+            role: user.role,
+            profileImage: photoProfil // peut être null
+        });
+    } catch (error) {
+        console.error("Erreur dans /api/me :", error);
+        return res.status(500).json({ message: 'Erreur lors de la récupération du profil utilisateur.' });
+    }
+});
+
+// PUT /api/me
+app.put('/api/me', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id; // ID depuis le token
+        const { nom, prenom, email, telephone, adresse } = req.body;
+
+        // On peut vérifier rapidement que certains champs ne sont pas vides
+        // (selon ta logique)
+        if (!nom || !prenom || !email) {
+            return res.status(400).json({ message: 'Champs obligatoires manquants.' });
+        }
+
+        // Mise à jour de l’utilisateur dans la table "User"
+        const result = await pool.query(`
+      UPDATE "User"
+      SET nom = $1,
+          prenom = $2,
+          email = $3,
+          telephone = $4,
+          adresse = $5
+      WHERE id = $6
+      RETURNING id, nom, prenom, email, telephone, adresse, role, photo_de_profil
+    `, [nom, prenom, email, telephone, adresse, userId]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Utilisateur introuvable.' });
+        }
+
+        // On récupère la ligne mise à jour
+        const updatedUser = result.rows[0];
+
+        // Renvoie un JSON confirmant la mise à jour
+        return res.status(200).json({
+            message: 'Mise à jour réussie.',
+            user: {
+                id: updatedUser.id,
+                nom: updatedUser.nom,
+                prenom: updatedUser.prenom,
+                email: updatedUser.email,
+                telephone: updatedUser.telephone,
+                adresse: updatedUser.adresse,
+                role: updatedUser.role,
+                photo_de_profil: updatedUser.photo_de_profil
+            }
+        });
+    } catch (error) {
+        console.error('Erreur dans PUT /api/me :', error);
+        return res.status(500).json({ message: 'Erreur lors de la mise à jour du profil.' });
+    }
+});
+
+
+app.get('/api/chauffeur/status', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur a le rôle chauffeur
+        if (req.user.role !== 'chauffeur') {
+            return res.status(403).json({ message: 'Accès refusé. Vous n’êtes pas chauffeur.' });
+        }
+
+        // Récupérer l'ID du user depuis le token
+        const userId = req.user.id;
+
+        // Joindre la table "User" et "Chauffeur"
+        const result = await pool.query(`
+      SELECT Chauffeur.disponibilite
+      FROM "User"
+      JOIN Chauffeur ON "User".id = Chauffeur.user_id
+      WHERE "User".id = $1
+    `, [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Chauffeur non trouvé.' });
+        }
+
+        const dispo = result.rows[0].disponibilite;
+        return res.json({ disponibilite: dispo });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Erreur lors de la récupération du statut chauffeur.' });
+    }
+});
+
+
+app.post('/api/chauffeur/disponibilite', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'chauffeur') {
+            return res.status(403).json({ message: 'Accès refusé. Vous n’êtes pas chauffeur.' });
+        }
+
+        const userId = req.user.id;
+        const { disponibilite } = req.body; // true ou false
+
+        // Mettre à jour la table Chauffeur
+        const result = await pool.query(`
+      UPDATE Chauffeur
+      SET disponibilite = $1
+      WHERE user_id = $2
+      RETURNING disponibilite
+    `, [disponibilite, userId]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Chauffeur non trouvé.' });
+        }
+
+        return res.status(200).json({
+            message: 'Disponibilité mise à jour.',
+            disponibilite: result.rows[0].disponibilite
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Erreur lors de la mise à jour de la disponibilité.' });
+    }
+});
+
+app.get('/api/chauffeur/reservations', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'chauffeur') {
+            return res.status(403).json({ message: 'Accès refusé : pas chauffeur.' });
+        }
+        const userId = req.user.id;
+        const status = req.query.status || 'en_attente';
+
+        const result = await pool.query(`
+            SELECT id, depart, arrivee, distance, prix, statut, date_prise_en_charge
+            FROM "reservation"
+            WHERE statut = $1
+              AND id_taxi = $2
+            ORDER BY date_creation DESC
+        `, [status, userId]);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Erreur...' });
+    }
+});
+
+
 
 // ------------------
 // Middleware global pour les erreurs
