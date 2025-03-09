@@ -507,25 +507,73 @@ app.post('/api/calculate-price', (req, res) => {
 // ------------------
 
 app.post('/api/reservations', authenticateToken, async (req, res) => {
-    const { id_utilisateur, id_taxi, depart, arrivee, distance, prix, date_prise_en_charge } = req.body;
+    const {
+        id_utilisateur,
+        id_taxi,
+        depart,
+        arrivee,
+        distance,
+        prix,
+        date_prise_en_charge,
+        nb_personnes,     // <-- Ajouté
+        animaux           // <-- Ajouté
+    } = req.body;
 
-    if (!id_utilisateur || !id_taxi || !depart || !arrivee || !distance || !prix || !date_prise_en_charge) {
+    // Vérification
+    if (
+        !id_utilisateur ||
+        !id_taxi ||
+        !depart ||
+        !arrivee ||
+        !distance ||
+        !prix ||
+        !date_prise_en_charge ||
+        nb_personnes === undefined ||
+        animaux === undefined
+    ) {
         return res.status(400).json({ message: 'Données incomplètes pour la réservation.' });
     }
 
     try {
+        // Insertion
         const result = await pool.query(`
-            INSERT INTO "reservation" (id_utilisateur, id_taxi, depart, arrivee, distance, prix, statut, date_prise_en_charge)
-            VALUES ($1, $2, $3, $4, $5, $6, 'demandée', $7)
+            INSERT INTO "reservation"
+            (
+                id_utilisateur, id_taxi, depart, arrivee,
+                distance, prix, statut, date_prise_en_charge,
+                nb_personnes, animaux
+            )
+            VALUES
+                (
+                    $1, $2, $3, $4,
+                    $5, $6, 'demandée', $7,
+                    $8, $9
+                )
                 RETURNING *;
-        `, [id_utilisateur, id_taxi, depart, arrivee, distance, prix, date_prise_en_charge]);
+        `, [
+            id_utilisateur,
+            id_taxi,
+            depart,
+            arrivee,
+            distance,
+            prix,
+            date_prise_en_charge,
+            nb_personnes, // paramètre $8
+            animaux       // paramètre $9
+        ]);
 
-        return res.status(201).json({ message: 'Réservation enregistrée avec succès.', reservation: result.rows[0] });
+        return res.status(201).json({
+            message: 'Réservation enregistrée avec succès.',
+            reservation: result.rows[0]
+        });
     } catch (error) {
         console.error(error);
-        return res.status(500).json({ message: 'Erreur lors de la réservation.' });
+        return res.status(500).json({
+            message: 'Erreur lors de la réservation.'
+        });
     }
 });
+
 
 
 // 🔥 Annulation d'une réservation par un client
@@ -558,6 +606,7 @@ app.delete('/api/reservations/:id', authenticateToken, async (req, res) => {
 
 
 // 🔹 Récupération des réservations pour un utilisateur ou un chauffeur
+// GET /api/users/:id/reservations
 app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
     try {
         const userIdFromParams = parseInt(req.params.id, 10);
@@ -571,28 +620,53 @@ app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
         let query;
         let values;
 
-        // Si l'utilisateur est un client, récupérer ses réservations uniquement
         if (userRole === 'client') {
             query = `
-                SELECT * FROM "reservation"
+                SELECT
+                    id,
+                    depart,
+                    arrivee,
+                    distance,
+                    prix,
+                    statut,
+                    date_prise_en_charge,
+                    nb_personnes,
+                    animaux
+                FROM "reservation"
                 WHERE id_utilisateur = $1
                 ORDER BY date_creation DESC;
             `;
             values = [userIdFromParams];
-
-            // Si c'est un chauffeur, récupérer les courses qui lui sont attribuées
         } else if (userRole === 'chauffeur') {
             query = `
-                SELECT * FROM "reservation"
+                SELECT
+                    id,
+                    depart,
+                    arrivee,
+                    distance,
+                    prix,
+                    statut,
+                    date_prise_en_charge,
+                    nb_personnes,
+                    animaux
+                FROM "reservation"
                 WHERE id_taxi = $1
                 ORDER BY date_creation DESC;
             `;
             values = [userIdFromParams];
-
-            // Si c'est un admin, afficher toutes les réservations du système
         } else if (userRole === 'admin') {
             query = `
-                SELECT * FROM "reservation"
+                SELECT
+                    id,
+                    depart,
+                    arrivee,
+                    distance,
+                    prix,
+                    statut,
+                    date_prise_en_charge,
+                    nb_personnes,
+                    animaux
+                FROM "reservation"
                 ORDER BY date_creation DESC;
             `;
             values = [];
@@ -605,6 +679,7 @@ app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
         res.status(500).json({ message: 'Erreur lors de la récupération des réservations.' });
     }
 });
+
 
 
 // GET /api/me
@@ -760,34 +835,20 @@ app.get('/api/chauffeur/reservations', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Accès refusé : pas chauffeur.' });
         }
         const userId = req.user.id;
-        const status = req.query.status || 'en attente';
-
-        const result = await pool.query(`
-            SELECT id, depart, arrivee, distance, prix, statut, date_prise_en_charge
-            FROM "reservation"
-            WHERE statut = $1
-              AND id_taxi = $2
-            ORDER BY date_creation DESC
-        `, [status, userId]);
-
-        res.json(result.rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Erreur...' });
-    }
-});
-
-
-// 🔹 Récupération des réservations pour un chauffeur
-app.get('/api/chauffeur/reservations', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'chauffeur') return res.status(403).json({ message: 'Accès refusé.' });
-
-        const userId = req.user.id;
         const status = req.query.status || 'demandée';
 
+        // On SELECT également nb_personnes et animaux
         const result = await pool.query(`
-            SELECT id, depart, arrivee, distance, prix, statut, date_prise_en_charge
+            SELECT
+                id,
+                depart,
+                arrivee,
+                distance,
+                prix,
+                statut,
+                date_prise_en_charge,
+                nb_personnes,
+                animaux
             FROM "reservation"
             WHERE statut = $1
               AND id_taxi = $2
@@ -800,6 +861,8 @@ app.get('/api/chauffeur/reservations', authenticateToken, async (req, res) => {
         res.status(500).json({ message: 'Erreur lors de la récupération des réservations.' });
     }
 });
+
+
 
 // 🔹 Accepter ou refuser une réservation
 app.put('/api/chauffeur/reservation/:id', authenticateToken, async (req, res) => {
@@ -827,15 +890,21 @@ app.put('/api/chauffeur/reservation/:id', authenticateToken, async (req, res) =>
             UPDATE "reservation"
             SET statut = $1
             WHERE id = $2
-            RETURNING *;
+                RETURNING *;
         `, [statut, reservationId]);
 
-        return res.status(200).json({ message: `Réservation ${statut}`, reservation: result.rows[0] });
+        return res.status(200).json({
+            message: `Réservation ${statut}`,
+            reservation: result.rows[0]
+        });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Erreur lors de la mise à jour du statut de la réservation.' });
+        res.status(500).json({
+            message: 'Erreur lors de la mise à jour du statut de la réservation.'
+        });
     }
 });
+
 
 
 // ------------------
