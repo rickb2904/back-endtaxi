@@ -1,200 +1,3 @@
-/*require('dotenv').config();
-
-const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
-
-const app = express();
-const port = 3000;
-
-app.use(bodyParser.json());
-app.use(cors());
-
-// Configuration de la connexion PostgreSQL
-const pool = new Pool({
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT,
-});
-
-// Clé secrète JWT
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// Middleware pour vérifier les tokens (désactivé temporairement)
-function authenticateToken(req, res, next) {
-    console.warn('Attention : la vérification des tokens est désactivée.');
-    next(); // Laisser passer toutes les requêtes
-}
-
-app.post('/api/register', async (req, res) => {
-    const { nom, prenom, email, mot_de_passe, role, telephone, adresse } = req.body;
-
-    if (!nom || !prenom || !email || !mot_de_passe || !role) {
-        return res.status(400).json({ message: 'Tous les champs obligatoires doivent être remplis.' });
-    }
-
-    try {
-        // Vérifier si l'email existe déjà
-        const existingUser = await pool.query('SELECT * FROM "User" WHERE email = $1', [email]);
-        if (existingUser.rows.length > 0) {
-            return res.status(409).json({ message: 'Cet email est déjà utilisé.' });
-        }
-
-        // Hacher le mot de passe
-        const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
-
-        // Insérer l'utilisateur dans la base de données
-        const query = `
-            INSERT INTO "User" (nom, prenom, email, mot_de_passe, role, telephone, adresse)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id, nom, prenom, email, role;
-        `;
-        const values = [nom, prenom, email, hashedPassword, role, telephone, adresse];
-        const result = await pool.query(query, values);
-
-        res.status(201).json({ message: 'Inscription réussie.', user: result.rows[0] });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur lors de l\'inscription.' });
-    }
-});
-
-
-// Route pour récupérer les taxis disponibles
-app.get('/api/taxis', async (req, res) => {
-    try {
-        // Requête SQL pour récupérer les taxis disponibles
-        const result = await pool.query(`
-            SELECT "User".id, "User".nom, "User".prenom, "User".latitude, "User".longitude
-            FROM "User"
-            INNER JOIN Chauffeur ON "User".id = Chauffeur.user_id
-            WHERE Chauffeur.disponibilite = TRUE
-        `);
-        res.status(200).json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur lors de la récupération des taxis.' });
-    }
-});
-
-
-// Route de connexion
-app.post('/api/login', async (req, res) => {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-        return res.status(400).json({ message: 'Email et mot de passe requis.' });
-    }
-
-    try {
-        // Recherche de l'utilisateur par email
-        const result = await pool.query(`SELECT * FROM "User" WHERE email = $1`, [email]);
-
-        if (result.rows.length === 0) {
-            return res.status(401).json({ message: 'Identifiants invalides.' });
-        }
-
-        const user = result.rows[0];
-
-        // Vérification du mot de passe
-        const isPasswordValid = await bcrypt.compare(password, user.mot_de_passe);
-        if (!isPasswordValid) {
-            return res.status(401).json({ message: 'Identifiants invalides.' });
-        }
-
-        // Génération d'un token JWT
-        const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, {
-            expiresIn: '1h',
-        });
-
-        res.status(200).json({ token, user: { id: user.id, email: user.email, nom: user.nom, prenom: user.prenom, role: user.role } });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur lors de la connexion.' });
-    }
-});
-
-// Exemple de route protégée (désactivation de la vérification des tokens)
-app.get('/api/protected', (req, res) => {
-    res.status(200).json({ message: `Bonjour, utilisateur. Vous êtes authentifié.` });
-});
-
-
-// Route "mot de passe oublié"
-app.post('/api/forgot-password', async (req, res) => {
-    const { email } = req.body;
-
-    if (!email) {
-        return res
-            .status(400)
-            .json({ message: 'Veuillez fournir un email.' });
-    }
-
-    try {
-        // Vérifier si l'utilisateur existe
-        const result = await pool.query(`SELECT * FROM "User" WHERE email = $1`, [email]);
-        if (result.rows.length === 0) {
-            return res
-                .status(404)
-                .json({ message: 'Aucun utilisateur trouvé avec cet email.' });
-        }
-
-        const user = result.rows[0];
-
-        // Pour l’exemple, on génère un nouveau mot de passe aléatoire
-        // Dans la réalité, on enverrait un lien de réinitialisation par email
-        const newPassword = Math.random().toString(36).substring(2, 8); // 6 caractères aléatoires
-        const hashed = await bcrypt.hash(newPassword, 10);
-
-        // Mettre à jour le mot de passe dans la base
-        await pool.query(
-            `UPDATE "User" SET mot_de_passe = $1 WHERE id = $2`,
-            [hashed, user.id]
-        );
-
-        // Répondre avec un message (ou le nouveau mdp pour la démo)
-        // Dans un vrai projet, on enverrait un email, pas un retour direct
-        res.status(200).json({
-            message: 'Mot de passe réinitialisé.',
-            newPassword: newPassword, // Pour la démo
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({
-            message: 'Erreur lors de la réinitialisation du mot de passe.',
-        });
-    }
-});
-
-
-// Route pour récupérer les utilisateurs (désactivation de la vérification des tokens)
-app.get('/api/users', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM "User"');
-        res.status(200).json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur lors de la récupération des utilisateurs.' });
-    }
-});
-
-// Middleware global pour les erreurs
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ message: 'Une erreur inattendue est survenue.' });
-});
-
-// Lancement du serveur
-app.listen(port, '0.0.0.0', () => {
-    console.log(`Serveur démarré et accessible sur http://0.0.0.0:${port}`);
-});
-*/
-
 require('dotenv').config();
 
 const express = require('express');
@@ -206,13 +9,33 @@ const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
 
 
+
+const multer = require('multer');
+const path = require('path');
+
+// Configuration de Multer pour stocker les images dans un dossier 'uploads'
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads/'); // Stocker les images dans un dossier 'uploads'
+    },
+    filename: (req, file, cb) => {
+        const fileExtension = path.extname(file.originalname); // Extrait l'extension du fichier
+        const filename = `${Date.now()}${fileExtension}`; // Génère un nom de fichier unique
+        cb(null, filename); // Nom de fichier final
+    }
+});
+
+const upload = multer({ storage: storage });
+
 // Création de l'app Express
 const app = express();
 const port = 3000;
 
 // Middleware
+app.use('/uploads', express.static('uploads'));
 app.use(bodyParser.json());
 app.use(cors());
+
 
 // Configuration PostgreSQL
 const pool = new Pool({
@@ -259,21 +82,21 @@ function authenticateToken(req, res, next) {
         if (err) {
             return res.status(403).json({ message: 'Token invalide ou expiré.' });
         }
-        // Stoker les infos du user dans req.user si besoin
         req.user = user;
         next();
     });
 }
 
 // ------------------
-// Route d’inscription (register)
+// Route d'inscription
 // ------------------
-app.post('/api/register', async (req, res) => {
-    // On ne récupère pas `role` depuis req.body
+// Route d'inscription avec multer pour gérer l'image
+app.post('/api/register', upload.single('photo_de_profil'), async (req, res) => {
     const { nom, prenom, email, mot_de_passe, telephone, adresse } = req.body;
+    const photo_de_profil = req.file ? `/uploads/${req.file.filename}` : null; // Récupère le chemin du fichier
 
-    // Vérification de base
-    if (!nom || !prenom || !email || !mot_de_passe) {
+    // Vérification des champs obligatoires
+    if (!nom || !prenom || !email || !mot_de_passe || !telephone) {
         return res.status(400).json({
             message: 'Tous les champs obligatoires doivent être remplis.'
         });
@@ -289,18 +112,14 @@ app.post('/api/register', async (req, res) => {
             return res.status(409).json({ message: 'Cet email est déjà utilisé.' });
         }
 
-        // Hacher le mot de passe
         const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
 
-        // Insérer l'utilisateur avec role = 'client'
         const query = `
-            INSERT INTO "User"
-                (nom, prenom, email, mot_de_passe, role, telephone, adresse)
-            VALUES
-                ($1, $2, $3, $4, 'client', $5, $6)
-                RETURNING id, nom, prenom, email, role;
+            INSERT INTO "User" (nom, prenom, email, mot_de_passe, role, telephone, adresse, photo_de_profil)
+            VALUES ($1, $2, $3, $4, 'client', $5, $6, $7)
+                RETURNING id, nom, prenom, email, role, photo_de_profil;
         `;
-        const values = [nom, prenom, email, hashedPassword, telephone, adresse];
+        const values = [nom, prenom, email, hashedPassword, telephone, adresse || null, photo_de_profil];
         const result = await pool.query(query, values);
 
         res.status(201).json({
@@ -311,6 +130,7 @@ app.post('/api/register', async (req, res) => {
         console.error(error);
         res.status(500).json({
             message: 'Erreur lors de l\'inscription.',
+            error: error.message,
         });
     }
 });
@@ -347,7 +167,6 @@ app.post('/api/login', async (req, res) => {
     }
 
     try {
-        // Recherche de l'utilisateur par email
         const result = await pool.query(`SELECT * FROM "User" WHERE email = $1`, [email]);
         if (result.rows.length === 0) {
             return res.status(401).json({ message: 'Identifiants invalides.' });
@@ -680,14 +499,11 @@ app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
     }
 });
 
-
-
-// GET /api/me
+// Route GET /api/me
 app.get('/api/me', authenticateToken, async (req, res) => {
     try {
-        const userId = req.user.id; // Récupération de l'ID depuis le token
+        const userId = req.user.id;
 
-        // Récupération de l'utilisateur
         const result = await pool.query(`
             SELECT *
             FROM "User"
@@ -700,10 +516,10 @@ app.get('/api/me', authenticateToken, async (req, res) => {
 
         const user = result.rows[0];
 
-        // Fallback si photo_de_profil est NULL => renvoie null
         const photoProfil = user.photo_de_profil || null;
 
-        // Réponse JSON (sans l'historique)
+        const profileImageUrl = photoProfil ? `http://192.168.0.95:3000/uploads/${photoProfil.split('/').pop()}` : null;
+
         return res.status(200).json({
             id: user.id,
             nom: user.nom,
@@ -712,13 +528,14 @@ app.get('/api/me', authenticateToken, async (req, res) => {
             telephone: user.telephone,
             adresse: user.adresse,
             role: user.role,
-            profileImage: photoProfil // peut être null
+            profileImage: profileImageUrl
         });
     } catch (error) {
         console.error("Erreur dans /api/me :", error);
         return res.status(500).json({ message: 'Erreur lors de la récupération du profil utilisateur.' });
     }
 });
+
 
 // PUT /api/me
 app.put('/api/me', authenticateToken, async (req, res) => {
