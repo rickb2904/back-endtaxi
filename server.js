@@ -7,7 +7,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
-
+const { WebSocketServer } = require('ws');
 
 
 const multer = require('multer');
@@ -301,19 +301,18 @@ app.post('/api/calculate-price', (req, res) => {
     try {
         const distance = haversineDistance(start, end);
 
-        // Grille tarifaire en fonction des kilomètres
         let price;
         if (distance <= 2) {
-            price = 5; // Tarif minimum
+            price = 5;
         } else if (distance <= 5) {
             price = 10;
         } else {
-            price = 10 + (distance - 5) * 1.5; // Exemple : 1.5 €/km au-delà de 5 km
+            price = 10 + (distance - 5) * 1.5;
         }
 
         return res.status(200).json({
-            distance: distance.toFixed(2), // Arrondi à 2 décimales
-            price: price.toFixed(2),      // Arrondi à 2 décimales
+            distance: distance.toFixed(2),
+            price: price.toFixed(2),
         });
     } catch (error) {
         console.error(error);
@@ -334,8 +333,8 @@ app.post('/api/reservations', authenticateToken, async (req, res) => {
         distance,
         prix,
         date_prise_en_charge,
-        nb_personnes,     // <-- Ajouté
-        animaux           // <-- Ajouté
+        nb_personnes,
+        animaux
     } = req.body;
 
     // Vérification
@@ -499,7 +498,7 @@ app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
     }
 });
 
-// Route GET /api/me
+// Route GET /api/me client -- chauffeur
 app.get('/api/me', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -543,8 +542,7 @@ app.put('/api/me', authenticateToken, async (req, res) => {
         const userId = req.user.id; // ID depuis le token
         const { nom, prenom, email, telephone, adresse } = req.body;
 
-        // On peut vérifier rapidement que certains champs ne sont pas vides
-        // (selon ta logique)
+
         if (!nom || !prenom || !email) {
             return res.status(400).json({ message: 'Champs obligatoires manquants.' });
         }
@@ -680,20 +678,24 @@ app.get('/api/chauffeur/reservations', authenticateToken, async (req, res) => {
 });
 
 
-
-// 🔹 Accepter ou refuser une réservation
+// -------------------
+// Accepter / Refuser / Annuler une réservation
+// -------------------
 app.put('/api/chauffeur/reservation/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'chauffeur') return res.status(403).json({ message: 'Accès refusé.' });
+    if (req.user.role !== 'chauffeur') {
+        return res.status(403).json({ message: 'Accès refusé.' });
+    }
 
     const userId = req.user.id;
     const reservationId = req.params.id;
     const { statut } = req.body;
 
-    if (!["acceptée", "refusée"].includes(statut)) {
+    if (!["acceptée", "refusée", "annulée"].includes(statut)) {
         return res.status(400).json({ message: 'Statut invalide.' });
     }
 
     try {
+        // Vérifier que la réservation appartient au chauffeur
         const checkReservation = await pool.query(`
             SELECT * FROM "reservation"
             WHERE id = $1 AND id_taxi = $2;
@@ -703,6 +705,7 @@ app.put('/api/chauffeur/reservation/:id', authenticateToken, async (req, res) =>
             return res.status(404).json({ message: 'Réservation non trouvée.' });
         }
 
+        // Mettre à jour le statut
         const result = await pool.query(`
             UPDATE "reservation"
             SET statut = $1
@@ -710,18 +713,19 @@ app.put('/api/chauffeur/reservation/:id', authenticateToken, async (req, res) =>
                 RETURNING *;
         `, [statut, reservationId]);
 
+        console.log(`PUT /api/chauffeur/reservation/${reservationId} => statut=${statut}`);
+
         return res.status(200).json({
             message: `Réservation ${statut}`,
             reservation: result.rows[0]
         });
     } catch (error) {
-        console.error(error);
+        console.error("Erreur PUT chauffeur/reservation/:id =>", error);
         res.status(500).json({
             message: 'Erreur lors de la mise à jour du statut de la réservation.'
         });
     }
 });
-
 
 
 // ------------------
