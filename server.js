@@ -90,7 +90,6 @@ function authenticateToken(req, res, next) {
 // ------------------
 // Route d'inscription
 // ------------------
-// Route d'inscription avec multer pour gérer l'image
 app.post('/api/register', upload.single('photo_de_profil'), async (req, res) => {
     const { nom, prenom, email, mot_de_passe, telephone, adresse } = req.body;
     const photo_de_profil = req.file ? `/uploads/${req.file.filename}` : null; // Récupère le chemin du fichier
@@ -423,82 +422,121 @@ app.delete('/api/reservations/:id', authenticateToken, async (req, res) => {
 
 
 
-// 🔹 Récupération des réservations pour un utilisateur ou un chauffeur
-// GET /api/users/:id/reservations
+// 🔹 Récupération des réservations pour un utilisateur (client/chauffeur/admin)
 app.get('/api/users/:id/reservations', authenticateToken, async (req, res) => {
     try {
         const userIdFromParams = parseInt(req.params.id, 10);
         const userIdFromToken = req.user.id;
         const userRole = req.user.role;
 
+        // Vérification : seul l'utilisateur concerné ou un admin peut voir ces données
         if (userIdFromParams !== userIdFromToken && userRole !== 'admin') {
             return res.status(403).json({ message: 'Accès refusé.' });
         }
 
         let query;
-        let values;
+        let values = [];
 
+        // --- Cas 1 : Client ---
         if (userRole === 'client') {
             query = `
                 SELECT
-                    id,
-                    depart,
-                    arrivee,
-                    distance,
-                    prix,
-                    statut,
-                    date_prise_en_charge,
-                    nb_personnes,
-                    animaux
-                FROM "reservation"
-                WHERE id_utilisateur = $1
-                ORDER BY date_creation DESC;
+                    r.id,
+                    r.depart,
+                    r.arrivee,
+                    r.distance,
+                    r.prix,
+                    r.statut,
+                    r.date_prise_en_charge,
+                    r.nb_personnes,
+                    r.animaux,
+
+                    -- Infos du client (qui a réservé)
+                    u.nom  AS client_nom,
+                    u.prenom AS client_prenom,
+
+                    -- Infos du chauffeur sélectionné
+                    chUser.nom  AS chauffeur_nom,
+                    chUser.prenom AS chauffeur_prenom
+
+                FROM "reservation" r
+                         JOIN "User" u        ON r.id_utilisateur = u.id
+                         JOIN "User" chUser   ON r.id_taxi       = chUser.id
+
+                WHERE r.id_utilisateur = $1
+                ORDER BY r.date_prise_en_charge DESC;
             `;
             values = [userIdFromParams];
-        } else if (userRole === 'chauffeur') {
+        }
+        // --- Cas 2 : Chauffeur ---
+        else if (userRole === 'chauffeur') {
             query = `
                 SELECT
-                    id,
-                    depart,
-                    arrivee,
-                    distance,
-                    prix,
-                    statut,
-                    date_prise_en_charge,
-                    nb_personnes,
-                    animaux
-                FROM "reservation"
-                WHERE id_taxi = $1
-                ORDER BY date_creation DESC;
+                    r.id,
+                    r.depart,
+                    r.arrivee,
+                    r.distance,
+                    r.prix,
+                    r.statut,
+                    r.date_prise_en_charge,
+                    r.nb_personnes,
+                    r.animaux,
+
+                    -- Infos du client
+                    cli.nom     AS client_nom,
+                    cli.prenom  AS client_prenom,
+
+                    -- Infos du chauffeur
+                    chUser.nom  AS chauffeur_nom,
+                    chUser.prenom AS chauffeur_prenom
+
+                FROM "reservation" r
+                         JOIN "User" cli      ON r.id_utilisateur = cli.id
+                         JOIN "User" chUser   ON r.id_taxi       = chUser.id
+
+                WHERE r.id_taxi = $1
+                ORDER BY r.date_prise_en_charge DESC;
             `;
             values = [userIdFromParams];
-        } else if (userRole === 'admin') {
+        }
+        // --- Cas 3 : Admin ---
+        else if (userRole === 'admin') {
             query = `
                 SELECT
-                    id,
-                    depart,
-                    arrivee,
-                    distance,
-                    prix,
-                    statut,
-                    date_prise_en_charge,
-                    nb_personnes,
-                    animaux
-                FROM "reservation"
-                ORDER BY date_creation DESC;
+                    r.id,
+                    r.depart,
+                    r.arrivee,
+                    r.distance,
+                    r.prix,
+                    r.statut,
+                    r.date_prise_en_charge,
+                    r.nb_personnes,
+                    r.animaux,
+
+                    -- Client
+                    cli.nom      AS client_nom,
+                    cli.prenom   AS client_prenom,
+
+                    -- Chauffeur
+                    chUser.nom   AS chauffeur_nom,
+                    chUser.prenom AS chauffeur_prenom
+
+                FROM "reservation" r
+                         JOIN "User" cli      ON r.id_utilisateur = cli.id
+                         JOIN "User" chUser   ON r.id_taxi       = chUser.id
+
+                ORDER BY r.date_prise_en_charge DESC;
             `;
-            values = [];
         }
 
         const result = await pool.query(query, values);
         return res.status(200).json(result.rows);
     } catch (error) {
         console.error('Erreur lors de la récupération des réservations :', error);
-        res.status(500).json({ message: 'Erreur lors de la récupération des réservations.' });
+        return res.status(500).json({ message: 'Erreur lors de la récupération des réservations.' });
     }
 });
 
-// Route GET /api/me client -- chauffeur
 app.get('/api/me', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -517,7 +555,7 @@ app.get('/api/me', authenticateToken, async (req, res) => {
 
         const photoProfil = user.photo_de_profil || null;
 
-        const profileImageUrl = photoProfil ? `http://192.168.0.95:3000/uploads/${photoProfil.split('/').pop()}` : null;
+        const profileImageUrl = photoProfil ? `http://192.168.1.41:3000/uploads/${photoProfil.split('/').pop()}` : null;
 
         return res.status(200).json({
             id: user.id,
@@ -643,37 +681,162 @@ app.put('/api/chauffeur/disponibilite', authenticateToken, async (req, res) => {
     }
 });
 
-
-app.get('/api/chauffeur/reservations', authenticateToken, async (req, res) => {
+// GET /api/chauffeur/me
+// Renvoie l'ID du chauffeur (table "chauffeur") associé au user_id = req.user.id
+app.get('/api/chauffeur/me', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'chauffeur') {
             return res.status(403).json({ message: 'Accès refusé : pas chauffeur.' });
         }
-        const userId = req.user.id;
-        const status = req.query.status || 'demandée';
 
-        // On SELECT également nb_personnes et animaux
+        const userId = req.user.id;
+        const result = await pool.query(`
+      SELECT id
+      FROM chauffeur
+      WHERE user_id = $1
+    `, [userId]);
+
+        if (result.rows.length === 0) {
+            // L'utilisateur n'a pas de ligne dans la table chauffeur
+            return res.status(404).json({ message: 'Aucun chauffeur trouvé pour ce user_id.' });
+        }
+
+        return res.json({ chauffeurId: result.rows[0].id });
+    } catch (err) {
+        console.error('Erreur /api/chauffeur/me :', err);
+        res.status(500).json({ message: 'Erreur lors de la récupération du chauffeurId.' });
+    }
+});
+
+
+// Récupère UNIQUEMENT les "demandée"
+app.get('/api/chauffeur/reservations/pending', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'chauffeur') {
+            return res.status(403).json({ message: 'Accès refusé : pas chauffeur.' });
+        }
+        const chauffeurId = parseInt(req.query.chauffeurId, 10);
+
         const result = await pool.query(`
             SELECT
-                id,
-                depart,
-                arrivee,
-                distance,
-                prix,
-                statut,
-                date_prise_en_charge,
-                nb_personnes,
-                animaux
-            FROM "reservation"
-            WHERE statut = $1
-              AND id_taxi = $2
-            ORDER BY date_creation DESC;
-        `, [status, userId]);
+                r.id,
+                r.depart,
+                r.arrivee,
+                r.distance,
+                r.prix,
+                r.statut,
+                r.date_prise_en_charge,
+                r.nb_personnes,
+                r.animaux,
 
-        res.json(result.rows);
+                -- Récupère seulement nom/prénom du client
+                cli.nom        AS client_nom,
+                cli.prenom     AS client_prenom
+
+            FROM reservation r
+                     JOIN chauffeur c       ON r.id_taxi = c.id
+                     JOIN "User"   cli      ON r.id_utilisateur = cli.id
+            WHERE r.id_taxi = $1
+              AND r.statut = 'demandée'
+            ORDER BY r.date_creation DESC;
+        `, [chauffeurId]);
+
+        return res.json(result.rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ message: 'Erreur lors de la récupération des réservations.' });
+        return res.status(500).json({
+            message: 'Erreur lors de la récupération des réservations en attente.'
+        });
+    }
+});
+
+
+// Récupère UNIQUEMENT les "acceptée"
+app.get('/api/chauffeur/reservations/accepted', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'chauffeur') {
+            return res.status(403).json({ message: 'Accès refusé : pas chauffeur.' });
+        }
+        const chauffeurId = parseInt(req.query.chauffeurId, 10);
+
+        const result = await pool.query(`
+            SELECT
+                r.id,
+                r.depart,
+                r.arrivee,
+                r.distance,
+                r.prix,
+                r.statut,
+                r.date_prise_en_charge,
+                r.nb_personnes,
+                r.animaux,
+
+                cli.nom        AS client_nom,
+                cli.prenom     AS client_prenom
+
+            FROM reservation r
+                     JOIN chauffeur c       ON r.id_taxi = c.id
+                     JOIN "User"   cli      ON r.id_utilisateur = cli.id
+            WHERE r.id_taxi = $1
+              AND r.statut = 'acceptée'
+            ORDER BY r.date_creation DESC;
+        `, [chauffeurId]);
+
+        return res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({
+            message: 'Erreur lors de la récupération des réservations acceptées.'
+        });
+    }
+});
+
+
+// Met à jour le statut d'une réservation (acceptée, refusée, annulée)
+app.put('/api/chauffeur/reservation/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'chauffeur') {
+        return res.status(403).json({ message: 'Accès refusé.' });
+    }
+
+    const userId = req.user.id;
+    const reservationId = req.params.id;
+    const { statut } = req.body;
+
+    // Vérification du statut
+    if (!["acceptée", "refusée", "annulée"].includes(statut)) {
+        return res.status(400).json({ message: 'Statut invalide.' });
+    }
+
+    try {
+        // Vérifier que la réservation appartient bien à ce chauffeur
+        const checkReservation = await pool.query(`
+            SELECT * FROM "reservation"
+            WHERE id = $1 AND id_taxi = $2;
+        `, [reservationId, userId]);
+
+        if (checkReservation.rows.length === 0) {
+            return res.status(404).json({ message: 'Réservation non trouvée.' });
+        }
+
+        // Mettre à jour le statut en base
+        const result = await pool.query(`
+            UPDATE "reservation"
+            SET statut = $1
+            WHERE id = $2
+            RETURNING *;
+        `, [statut, reservationId]);
+
+        console.log(`PUT /api/chauffeur/reservation/${reservationId} => statut=${statut}`);
+
+        return res.status(200).json({
+            message: `Réservation ${statut}`,
+            reservation: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Erreur PUT chauffeur/reservation/:id =>", error);
+        res.status(500).json({
+            message: 'Erreur lors de la mise à jour du statut de la réservation.'
+        });
     }
 });
 
