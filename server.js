@@ -1,3 +1,4 @@
+/*
 require('dotenv').config();
 
 const express = require('express');
@@ -59,6 +60,9 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASS,
     },
 });
+
+
+
 // ------------------
 // Middleware pour vérifier le token
 // ------------------
@@ -273,50 +277,85 @@ app.get('/api/users', async (req, res) => {
 // ------------------
 // Calcul des frais de trajet
 // ------------------
-const haversineDistance = (coord1, coord2) => {
-    const toRad = (angle) => (angle * Math.PI) / 180;
+// ---------------------------------------------------------------------
+// 2) OUTILS DISTANCE
+// ---------------------------------------------------------------------
+const R = 6371;                             // Rayon de la Terre (km)
+const toRad = (deg) => (deg * Math.PI) / 180;
 
-    const R = 6371; // Rayon de la Terre en kilomètres
-    const dLat = toRad(coord2.latitude - coord1.latitude);
-    const dLon = toRad(coord2.longitude - coord1.longitude);
+const haversineDistance = (p1, p2) => {
+    const dLat = toRad(p2.latitude - p1.latitude);
+    const dLon = toRad(p2.longitude - p1.longitude);
     const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(toRad(coord1.latitude)) *
-        Math.cos(toRad(coord2.latitude)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(p1.latitude)) *
+        Math.cos(toRad(p2.latitude)) *
+        Math.sin(dLon / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Distance en kilomètres
+    return R * c; // km
 };
 
+const polylineDistance = (pts = []) => {
+    if (!Array.isArray(pts) || pts.length < 2) return 0;
+    let total = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+        total += haversineDistance(
+            { latitude: pts[i].lat, longitude: pts[i].lng },
+            { latitude: pts[i + 1].lat, longitude: pts[i + 1].lng }
+        );
+    }
+    return total;
+};
+
+// ---------------------------------------------------------------------
+// 3) PARAMÉTRAGE TARIFS
+// ---------------------------------------------------------------------
+const DAY_RATE   = 1.04;   // € / km
+const NIGHT_RATE = 3.00;   // € / km
+const isNightHour = (date) => {
+    const h = date.getHours();
+    return h >= 22 || h < 6;
+};
+
+// ---------------------------------------------------------------------
+// 4) ROUTE CALCUL PRIX
+// ---------------------------------------------------------------------
 app.post('/api/calculate-price', (req, res) => {
-    const { start, end } = req.body;
+    const { start, end, route, timestamp } = req.body;
 
-    if (!start || !end || !start.latitude || !start.longitude || !end.latitude || !end.longitude) {
-        return res.status(400).json({ message: 'Coordonnées de départ et d\'arrivée nécessaires.' });
+    // 4-a) DISTANCE
+    let distanceKm = 0;
+
+    if (Array.isArray(route) && route.length >= 2) {
+        distanceKm = polylineDistance(route);
+    } else if (
+        start && end &&
+        typeof start.latitude === 'number' &&
+        typeof start.longitude === 'number' &&
+        typeof end.latitude === 'number' &&
+        typeof end.longitude === 'number'
+    ) {
+        distanceKm = haversineDistance(start, end);
+    } else {
+        return res.status(400).json({ message: 'Route ou coordonnées invalides.' });
     }
 
-    try {
-        const distance = haversineDistance(start, end);
+    // 4-b) TARIF
+    const refDate  = timestamp ? new Date(timestamp) : new Date();
+    const night    = isNightHour(refDate);
+    const rate     = night ? NIGHT_RATE : DAY_RATE;
+    const rateType = night ? 'night'    : 'day';
 
-        let price;
-        if (distance <= 2) {
-            price = 5;
-        } else if (distance <= 5) {
-            price = 10;
-        } else {
-            price = 10 + (distance - 5) * 1.5;
-        }
+    // 4-c) PRIX
+    const price = distanceKm * rate;
 
-        return res.status(200).json({
-            distance: distance.toFixed(2),
-            price: price.toFixed(2),
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur lors du calcul du prix.' });
-    }
+    // 4-d) RÉPONSE
+    res.json({
+        distance : distanceKm.toFixed(2),  // "7.83"
+        rate     : rate.toFixed(2),        // "3.00"
+        rateType,                          // "night"
+        price    : price.toFixed(2),       // "23.49"
+    });
 });
 
 // ------------------
@@ -905,3 +944,27 @@ app.use((err, req, res, next) => {
 app.listen(port, '0.0.0.0', () => {
     console.log(`Serveur démarré et accessible sur http://0.0.0.0:${port}`);
 });
+*/
+
+// ──────────────────────────────────────────────────────────────────────────────
+// server.js
+// ──────────────────────────────────────────────────────────────────────────────
+const http = require('http');
+const { WebSocketServer } = require('ws');
+const app = require('./app');
+
+const port = process.env.PORT || 3000;
+const server = http.createServer(app);
+
+// WebSocket optionnel (à adapter à votre logique temps‑réel)
+const wss = new WebSocketServer({ server });
+wss.on('connection', (ws) => {
+    ws.on('message', (msg) => console.log('WS message:', msg.toString()));
+    ws.send('Bienvenue sur WebSocket');
+});
+
+server.listen(port, '0.0.0.0', () => {
+    console.log(`🚀  Serveur HTTP/WS lancé sur http://0.0.0.0:${port}`);
+});
+
+// ═
