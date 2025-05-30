@@ -32,6 +32,7 @@ app.use('/api', chauffeurRoutes);
 app.use('/api', paiementRoutes);
 app.use('/api', notificationRoutes);
 
+
 /* Profils : préfixe /api/users  */
 app.use('/api/users', userRoutes);      //  --> /api/users/me
 

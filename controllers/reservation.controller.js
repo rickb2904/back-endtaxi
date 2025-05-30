@@ -24,9 +24,40 @@ exports.listForUser = async (req, res, next) => {
     } catch (e) { next(e); }
 };
 
-exports.updateStatut = async (req, res, next) => {
+exports.updateStatut = async (req, res) => {
     try {
-        const updated = await reservationSvc.updateStatut(req.params.id, req.user.id, req.body.statut);
-        res.json({ message: `Réservation ${req.body.statut}`, reservation: updated });
-    } catch (e) { next(e); }
+        const id = parseInt(req.params.id, 10);
+        const { statut } = req.body;
+        const updated = await reservationSvc.updateStatut(id, statut);
+        res.json(updated);
+    } catch (e) {
+        res.status(404).json({ message: e.message });
+    }
 };
+
+
+
+exports.validateByClient = async (req, res, next) => {
+    try {
+        const { statut, message } = req.body;
+
+        if (statut !== 'terminée' && statut !== 'litige') {
+            return res.status(400).json({ error: 'Statut invalide' });
+        }
+
+        const result = await reservationSvc.validateByClient(req.params.id, req.user.id, statut, message);
+        res.json({ message: `Réservation marquée comme ${statut}`, reservation: result });
+    } catch (e) {
+        next(e);
+    }
+};
+
+exports.autoComplete = async (req, res, next) => {
+    try {
+        const count = await reservationSvc.autoCompleteOldReservations();
+        res.json({ message: `${count} réservation(s) terminée(s) automatiquement.` });
+    } catch (e) {
+        next(e);
+    }
+};
+

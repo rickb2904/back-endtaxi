@@ -45,27 +45,46 @@ exports.updateStatus = async (id, s) => (await poolR.query(
     `UPDATE Reservation SET statut = $1 WHERE id = $2 RETURNING *;`, [s, id])).rows[0];
 
 /* ---------------------- Sélections “full” ------------------ */
-exports.forClientFull = async (userId) => (await poolR.query(`
+exports.forClientFull = async (userId) => {
+    const { rows } = await poolR.query(`
     SELECT ${baseCols},
-           chUser.nom    AS chauffeur_nom,
-           chUser.prenom AS chauffeur_prenom
+           json_build_object(
+             'prenom', chUser.prenom,
+             'nom', chUser.nom,
+             'email', chUser.email,
+             'telephone', chUser.telephone,
+             'photo_de_profil', chUser.photo_de_profil
+           ) AS utilisateur
     FROM   Reservation r
-               JOIN   Chauffeur    ch     ON r.id_taxi   = ch.id
-               JOIN   "User"       chUser ON ch.user_id  = chUser.id
+    JOIN   Chauffeur    ch     ON r.id_taxi   = ch.id
+    JOIN   "User"       chUser ON ch.user_id  = chUser.id
     WHERE  r.id_utilisateur = $1
-    ORDER  BY r.date_prise_en_charge DESC;`, [userId])).rows;
+    ORDER  BY r.date_prise_en_charge DESC;
+  `, [userId]);
+
+    return rows;
+};
 
 
-exports.forChauffeurFull = async (userUserId) => (await poolR.query(`
-  SELECT ${baseCols},
-         cli.nom       AS client_nom,
-         cli.prenom    AS client_prenom
-  FROM   Chauffeur    ch
-  JOIN   Reservation  r   ON ch.id = r.id_taxi
-  JOIN   "User"       cli ON cli.id = r.id_utilisateur
-  WHERE  ch.user_id = $1
-  ORDER  BY r.date_prise_en_charge DESC;`, [userUserId])).rows;
+exports.forChauffeurFull = async (userUserId) => {
+    const { rows } = await poolR.query(`
+    SELECT ${baseCols},
+           json_build_object(
+             'prenom', cli.prenom,
+             'nom', cli.nom,
+             'email', cli.email,
+             'telephone', cli.telephone,
+             'photo_de_profil', cli.photo_de_profil
+           ) AS utilisateur
+    FROM   Chauffeur    ch
+    JOIN   Reservation  r   ON ch.id = r.id_taxi
+    JOIN   "User"       cli ON cli.id = r.id_utilisateur
+    WHERE  ch.user_id = $1
+    ORDER  BY r.date_prise_en_charge DESC;
+  `, [userUserId]);
 
+    return rows;
+};
 
 exports.allFull = async () => (await poolR.query(`
   SELECT ${baseCols},
@@ -78,3 +97,6 @@ exports.allFull = async () => (await poolR.query(`
   JOIN   Chauffeur    ch     ON ch.id  = r.id_taxi
   JOIN   "User"       chUser ON ch.user_id = chUser.id
   ORDER  BY r.date_prise_en_charge DESC;`)).rows;
+
+exports.setLitigeMessage = async (id, message) =>
+    poolR.query(`UPDATE Reservation SET litige_message = $1 WHERE id = $2`, [message, id]);

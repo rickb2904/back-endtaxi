@@ -14,6 +14,14 @@ exports.create = async ({ nom, prenom, email, password, tel, adresse, photo, rol
 
 exports.findByEmail = async (email) => (await pool.query(`SELECT * FROM "User" WHERE email=$1`, [email])).rows[0];
 exports.findById    = async (id)    => (await pool.query(`SELECT * FROM "User" WHERE id=$1`, [id])).rows[0];
+exports.updatePassword = async (id, hashedPassword) => {
+    const query = `
+    UPDATE "User"
+    SET mot_de_passe = $1
+    WHERE id = $2
+  `;
+    await pool.query(query, [hashedPassword, id]);
+};
 
 exports.update = async (id, data) => {
     const { nom, prenom, email, telephone, adresse } = data;

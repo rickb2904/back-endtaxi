@@ -6,4 +6,7 @@ routerRes.post('/reservations',          auth, resCtrl.create);
 routerRes.delete('/reservations/:id',    auth, resCtrl.cancel);
 routerRes.get('/users/:id/reservations', auth, resCtrl.listForUser);
 routerRes.put('/chauffeur/reservation/:id', auth, resCtrl.updateStatut);
+routerRes.put('/client/reservation/:id', auth, resCtrl.validateByClient);
+routerRes.post('/reservations/auto-complete', resCtrl.autoComplete);
+
 module.exports = routerRes;

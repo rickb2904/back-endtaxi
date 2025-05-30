@@ -11,8 +11,7 @@ exports.getMe = async (req, res, next) => {
         const u = await userSvc.getById(req.user.id);
         if (!u) return res.status(404).json({ message: 'Utilisateur introuvable' });
 
-        // Si la BDD stocke « /uploads/xxxx.jpg » on construit l’URL absolue
-        const host = req.protocol + '://' + req.get('host');            // http://192.168.1.41:3000
+        const host = req.protocol + '://' + req.get('host');
         const profileImage = u.photo_de_profil
             ? `${host}${u.photo_de_profil.startsWith('/') ? '' : '/'}${u.photo_de_profil}`
             : null;
@@ -25,8 +24,8 @@ exports.getMe = async (req, res, next) => {
             telephone : u.telephone,
             adresse   : u.adresse,
             role      : u.role,
-            photo_de_profil : u.photo_de_profil,     // chemin brut (si tu en as besoin)
-            profileImage                               // URL prête à l’emploi côté Flutter
+            photo_de_profil : u.photo_de_profil,
+            profileImage
         });
     } catch (e) { next(e); }
 };
