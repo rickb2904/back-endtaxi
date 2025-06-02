@@ -9,7 +9,7 @@ exports.register = async (dto) => {
         throw new Error('Cet email existe déjà');
 
     const hash = await bcrypt.hash(dto.mot_de_passe, 10);
-    return UserModel.create({ ...dto, password: hash });
+    return await UserModel.create({ ...dto, password: hash });
 };
 
 exports.login = async ({ email, password }) => {
@@ -22,12 +22,19 @@ exports.login = async ({ email, password }) => {
         JWT_SECRET,
         { expiresIn: '1h' }
     );
-    return { token, user };
+
+    // Supprimer le mot de passe de l'objet retourné
+    const { mot_de_passe, ...userSansMotDePasse } = user;
+    return { token, user: userSansMotDePasse };
 };
 
 exports.sendResetMail = async (user) => {
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET,
-        { expiresIn: RESET_TOKEN_EXPIRATION });
+    const token = jwt.sign(
+        { id: user.id, email: user.email },
+        JWT_SECRET,
+        { expiresIn: RESET_TOKEN_EXPIRATION }
+    );
+
     await mailer.sendMail({
         from   : process.env.EMAIL_USER,
         to     : user.email,
@@ -36,9 +43,6 @@ exports.sendResetMail = async (user) => {
     });
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// AJOUT : fonction resetPassword
-// ──────────────────────────────────────────────────────────────────────────────
 exports.resetPassword = async (token, newPassword) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
