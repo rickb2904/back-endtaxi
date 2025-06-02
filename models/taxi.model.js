@@ -7,12 +7,8 @@ const { pool } = require('../config/db');
  */
 exports.listDisponibles = async () =>
     (await pool.query(`
-    SELECT u.id,
-           u.nom,
-           u.prenom,
-           u.latitude,
-           u.longitude
-    FROM   "User"     u
-    JOIN   Chauffeur  c ON u.id = c.user_id
-    WHERE  c.disponibilite = TRUE;
-  `)).rows;
+        SELECT c.id AS id, c.user_id, u.nom, u.prenom, u.latitude, u.longitude
+        FROM Chauffeur c
+                 JOIN "user" u ON u.id = c.user_id
+        WHERE c.disponibilite = TRUE;
+    `)).rows;

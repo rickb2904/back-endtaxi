@@ -23,7 +23,7 @@ exports.pendingReservations = async (chauffeurId) =>
                     u.nom  AS client_nom,
                     u.prenom AS client_prenom
             FROM    reservation           r
-                        JOIN    "User"                u  ON u.id = r.id_utilisateur
+                        JOIN    "user"                u  ON u.id = r.id_utilisateur
             WHERE   r.id_taxi = $1
               AND   r.statut  = 'demandée'
             ORDER BY r.date_creation DESC
@@ -38,7 +38,7 @@ exports.acceptedReservations = async (chauffeurId) =>
                     u.nom  AS client_nom,
                     u.prenom AS client_prenom
             FROM    reservation           r
-                        JOIN    "User"                u  ON u.id = r.id_utilisateur
+                        JOIN    "user"                u  ON u.id = r.id_utilisateur
             WHERE   r.id_taxi = $1
               AND   r.statut  = 'acceptée'
             ORDER BY r.date_creation DESC

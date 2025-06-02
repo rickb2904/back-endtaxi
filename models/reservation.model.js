@@ -57,7 +57,7 @@ exports.forClientFull = async (userId) => {
            ) AS utilisateur
     FROM   Reservation r
     JOIN   Chauffeur    ch     ON r.id_taxi   = ch.id
-    JOIN   "User"       chUser ON ch.user_id  = chUser.id
+    JOIN   "user"       chUser ON ch.user_id  = chUser.id
     WHERE  r.id_utilisateur = $1
     ORDER  BY r.date_prise_en_charge DESC;
   `, [userId]);
@@ -78,7 +78,7 @@ exports.forChauffeurFull = async (userUserId) => {
            ) AS utilisateur
     FROM   Chauffeur    ch
     JOIN   Reservation  r   ON ch.id = r.id_taxi
-    JOIN   "User"       cli ON cli.id = r.id_utilisateur
+    JOIN   "user"       cli ON cli.id = r.id_utilisateur
     WHERE  ch.user_id = $1
     ORDER  BY r.date_prise_en_charge DESC;
   `, [userUserId]);
@@ -93,9 +93,9 @@ exports.allFull = async () => (await poolR.query(`
          chUser.nom    AS chauffeur_nom,
          chUser.prenom AS chauffeur_prenom
   FROM   Reservation  r
-  JOIN   "User"       cli    ON cli.id = r.id_utilisateur
+  JOIN   "user"       cli    ON cli.id = r.id_utilisateur
   JOIN   Chauffeur    ch     ON ch.id  = r.id_taxi
-  JOIN   "User"       chUser ON ch.user_id = chUser.id
+  JOIN   "user"       chUser ON ch.user_id = chUser.id
   ORDER  BY r.date_prise_en_charge DESC;`)).rows;
 
 exports.setLitigeMessage = async (id, message) =>

@@ -35,9 +35,13 @@ exports.login = async (req, res, next) => {
     try {
         res.json(await authSvc.login(req.body));
     } catch (e) {
-        next(e);
+        if (e.message === 'Identifiants invalides') {
+            return res.status(401).json({ message: e.message });
+        }
+        next(e); // Pour les autres erreurs
     }
 };
+
 
 // ────────────────
 // Mot de passe oublié
