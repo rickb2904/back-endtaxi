@@ -61,3 +61,12 @@ exports.autoComplete = async (req, res, next) => {
     }
 };
 
+exports.validateByChauffeur = async (req, res, next) => {
+    try {
+        const result = await reservationSvc.validateByChauffeur(req.params.id, req.user.id);
+        res.json({ message: `Réservation validée par le chauffeur`, reservation: result });
+    } catch (e) {
+        next(e);
+    }
+};
+

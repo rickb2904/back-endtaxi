@@ -1,8 +1,14 @@
-// ──────────────────────────────────────────────────────────────────────────────
-// routes/paiement.route.js
-// ──────────────────────────────────────────────────────────────────────────────
-const routerPay = require('express').Router();
-const payCtrl   = require('../controllers/paiement.controller');
-routerPay.post('/paiement', payCtrl.create);
-routerPay.put('/paiement/:id', payCtrl.updateStatus);
-module.exports = routerPay;
+const express = require('express');
+const router = express.Router();
+const paiementController = require('../controllers/paiement.controller');
+
+// Création du PaymentIntent (pré-autorisation)
+router.post('/create-intent', paiementController.createIntent);
+
+// Capture du paiement à la fin de la course
+router.post('/capture', paiementController.capturePayment);
+
+// Remboursement en cas d’annulation/refus
+router.post('/refund', paiementController.refundPayment);
+
+module.exports = router;

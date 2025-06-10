@@ -88,18 +88,24 @@ exports.validateByClient = async (id, clientId, statut, message = null) => {
 
 exports.autoCompleteOldReservations = async () => {
     const { rows } = await poolR.query(`
-        UPDATE Reservation
-        SET statut = 'terminée'
+        SELECT * FROM reservation
         WHERE statut = 'acceptée'
           AND date_prise_en_charge < NOW() - INTERVAL '48 hours'
-        RETURNING id;
+          AND NOT (client_confirmation AND chauffeur_confirmation)
     `);
 
     for (const r of rows) {
+        await poolR.query(`UPDATE reservation SET statut = 'terminée' WHERE id = $1`, [r.id]);
+
+        const stripe = require('../config/stripe');
+        await stripe.paymentIntents.capture(r.stripe_payment_intent_id);
+
+        await poolR.query(`UPDATE paiement SET statut = 'validé', updated_at = NOW() WHERE reservation_id = $1`, [r.id]);
+
         await Notification.create({
             reservation_id: r.id,
             titre: 'Réservation terminée automatiquement',
-            message: 'La réservation a été marquée comme terminée après 48h sans validation manuelle.'
+            message: 'La réservation a été marquée comme terminée après 48h sans validation.'
         });
     }
 
@@ -126,4 +132,30 @@ exports.cancel = async (id, userId) => {
         titre : 'Réservation annulée',
         message: 'La réservation a été annulée par un utilisateur.'
     });
+};
+
+exports.validateByChauffeur = async (id, chauffeurUserId) => {
+    const resa = await Reservation.findById(id);
+    if (!resa) throw new Error("Réservation introuvable");
+
+    // Vérifie que le chauffeur correspond
+    const ch = await poolR.query(`SELECT * FROM chauffeur WHERE id = $1`, [resa.id_taxi]);
+    if (ch.rows[0]?.user_id !== chauffeurUserId) throw new Error("Non autorisé");
+
+    await poolR.query(`UPDATE reservation SET chauffeur_confirmation = TRUE WHERE id = $1`, [id]);
+
+    const updated = await Reservation.findById(id);
+
+    if (updated.client_confirmation && updated.chauffeur_confirmation) {
+        // ✅ Les deux ont validé → capture paiement
+        const stripe = require('../config/stripe');
+        await stripe.paymentIntents.capture(updated.stripe_payment_intent_id);
+
+        await poolR.query(`
+            UPDATE paiement SET statut = 'validé', updated_at = NOW()
+            WHERE reservation_id = $1
+        `, [id]);
+    }
+
+    return updated;
 };
