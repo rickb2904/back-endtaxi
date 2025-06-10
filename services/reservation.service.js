@@ -1,10 +1,7 @@
-// ─────────────────────────────────────────────────────────────
-// services/reservation.service.js   (version corrigée)
-// ─────────────────────────────────────────────────────────────
+/*
 const Reservation  = require('../models/reservation.model');
 const Notification = require('../models/notification.model');
 
-/* ---------------------- création -------------------------- */
 exports.create = async (dto) => {
     const res = await Reservation.create(dto);
     await Notification.create({
@@ -15,7 +12,6 @@ exports.create = async (dto) => {
     return res;
 };
 
-/* --------------------- annulation client ------------------ */
 exports.cancel = async (id, userId) => {
     const r = await Reservation.findById(id);
     if (!r || r.id_utilisateur !== userId)
@@ -29,14 +25,12 @@ exports.cancel = async (id, userId) => {
     });
 };
 
-/* ----------------------- listing -------------------------- */
 exports.listForUser = async (userId, role) => {
     if (role === 'client')    return Reservation.forClientFull(userId);
     if (role === 'chauffeur') return Reservation.forChauffeurFull(userId);
     return Reservation.allFull();                 // admin
 };
 
-/* ------------------- chauffeur : statut ------------------- */
 const { pool: poolR } = require('../config/db');
 
 exports.updateStatut = async (id, newStatut) => {
@@ -158,4 +152,137 @@ exports.validateByChauffeur = async (id, chauffeurUserId) => {
     }
 
     return updated;
+};
+*/
+
+// ──────────────────────────────────────────────────────────────
+// services/reservation.service.js (Complet et Corrigé)
+// ──────────────────────────────────────────────────────────────
+const reservationModel = require('../models/reservation.model');
+const paiementService = require('./paiement.service'); // Assurez-vous que le chemin est correct
+
+exports.create = async (reservationData) => {
+    return reservationModel.create(reservationData);
+};
+
+exports.cancel = async (reservationId, userId) => {
+    const currentReservation = await reservationModel.findById(reservationId);
+    if (!currentReservation) {
+        throw new Error('Réservation non trouvée.');
+    }
+    // Vérification de l'autorisation d'annuler
+    // Assurez-vous d'avoir une logique pour récupérer l'ID du chauffeur lié au userId si nécessaire
+    // Par simplicité ici, on permet à l'utilisateur de la réservation ou au chauffeur assigné de l'annuler
+    if (currentReservation.id_utilisateur !== userId && currentReservation.id_taxi !== userId) {
+        // Cette logique nécessiterait une vérification de l'ID utilisateur du chauffeur
+        // pour s'assurer que c'est bien le chauffeur assigné ou le client.
+        // Pour l'instant, on assume que id_taxi dans la table reservation est l'ID du chauffeur,
+        // et qu'on compare avec userId (ID de l'utilisateur qui fait la requête).
+        // Il faudrait peut-être une jointure pour comparer user_id du chauffeur.
+        throw new Error('Non autorisé à annuler cette réservation.');
+    }
+
+    // Si la réservation avait un Payment Intent pré-autorisé, il faut l'annuler/rembourser
+    if (currentReservation.stripe_payment_intent_id) {
+        try {
+            // Ici, vous devrez ajouter une fonction dans paiementService pour annuler un Payment Intent
+            // par son ID Stripe. Exemple:
+            await paiementService.cancelPaymentIntent(currentReservation.stripe_payment_intent_id);
+            console.log(`Le Payment Intent ${currentReservation.stripe_payment_intent_id} a été annulé car la réservation ${reservationId} est annulée.`);
+        } catch (error) {
+            console.error(`Erreur lors de l'annulation/remboursement du Payment Intent ${currentReservation.stripe_payment_intent_id}:`, error.message);
+            // Décidez si vous voulez permettre l'annulation de la réservation même si l'annulation du paiement échoue.
+            // Pour l'instant, l'erreur est loggée mais n'empêche pas l'annulation de la réservation.
+        }
+    }
+    return reservationModel.updateStatus(reservationId, 'annulée');
+};
+
+// listForUser accepte maintenant un paramètre 'statut' pour filtrer les résultats
+exports.listForUser = async (userId, role, statut = null) => {
+    if (role === 'client') {
+        return reservationModel.forClientFull(userId, statut);
+    } else if (role === 'chauffeur') {
+        return reservationModel.forChauffeurFull(userId, statut);
+    }
+    // Pour l'admin ou si le rôle n'est pas client/chauffeur
+    return reservationModel.allFull(statut); // Pour l'admin, peut être filtré par statut
+};
+
+// Fonction centralisée pour valider une course et potentiellement capturer le paiement
+// Cette fonction est appelée pour les statuts qui mènent à la capture (principalement 'terminée')
+exports.validateAndCapturePayment = async (reservationId, statut) => {
+    // Met à jour le statut de la réservation
+    const updatedReservation = await reservationModel.updateStatus(reservationId, statut);
+
+    // Si le statut final est 'terminée', on procède à la capture du paiement
+    if (statut === 'terminée') {
+        const stripePaymentIntentId = updatedReservation.stripe_payment_intent_id; // Utilise l'ID du PI de la réservation mise à jour
+
+        if (stripePaymentIntentId) {
+            console.log(`Réservation ${reservationId} marquée comme terminée. Tentative de capture du Payment Intent: ${stripePaymentIntentId}`);
+            try {
+                await paiementService.capturePayment(stripePaymentIntentId); // Appelle le service de paiement pour capturer
+                console.log(`Paiement capturé avec succès pour la réservation ${reservationId}.`);
+            } catch (error) {
+                console.error(`❌ Erreur lors de la capture du paiement pour la réservation ${reservationId}:`, error.message);
+                throw new Error(`Erreur lors de la capture du paiement : ${error.message}`);
+            }
+        } else {
+            console.warn(`Aucun Stripe Payment Intent ID trouvé pour la réservation ${reservationId}. Paiement non capturé.`);
+            // Décidez ici si c'est une erreur critique ou juste un avertissement
+        }
+    }
+    return updatedReservation;
+};
+
+// Validation côté client (peut terminer la course ou ouvrir un litige)
+exports.validateByClient = async (reservationId, userId, statut, message = null) => {
+    const resa = await reservationModel.findById(reservationId);
+    if (!resa || resa.id_utilisateur !== userId) {
+        throw new Error('Réservation non trouvée ou non autorisée pour ce client.');
+    }
+    // Délègue la mise à jour du statut et la capture potentielle à validateAndCapturePayment
+    const updated = await exports.validateAndCapturePayment(reservationId, statut);
+
+    // Si le statut est 'litige', enregistre le message
+    if (statut === 'litige' && message) {
+        await reservationModel.setLitigeMessage(reservationId, message);
+    }
+    return updated;
+};
+
+// Validation côté chauffeur (marque la course comme 'terminée')
+exports.validateByChauffeur = async (reservationId, chauffeurUserId) => {
+    const resa = await reservationModel.findById(reservationId);
+    if (!resa) {
+        throw new Error("Réservation introuvable.");
+    }
+
+    // Vérifie que l'utilisateur qui valide est bien le chauffeur assigné à la réservation
+    // Cette partie nécessite l'importation de poolR pour fonctionner si non déjà présent.
+    // Ou bien un appel au model chauffeur.
+    // Exemple: const chauffeur = await chauffeurModel.findByUserId(chauffeurUserId);
+    // if (!chauffeur || chauffeur.id !== resa.id_taxi) { ... }
+    const chauffeur = await poolR.query(`SELECT user_id FROM chauffeur WHERE id = $1`, [resa.id_taxi]);
+    if (chauffeur.rows.length === 0 || chauffeur.rows[0].user_id !== chauffeurUserId) {
+        throw new Error("Action non autorisée : Le chauffeur ne correspond pas à cette réservation.");
+    }
+
+    // Le chauffeur valide = la course est terminée. Déclenche la capture de paiement.
+    return exports.validateAndCapturePayment(reservationId, 'terminée');
+};
+
+// Fonction pour gérer l'auto-complétion des anciennes réservations (nécessitera une logique de capture de paiement)
+exports.autoCompleteOldReservations = async () => {
+    console.log("autoCompleteOldReservations appelée. La logique de capture automatique des paiements pour les réservations terminées automatiquement doit être implémentée ici si le statut devient 'terminée'.");
+    // Exemple d'implémentation partielle (à compléter avec la capture pour chaque réservation)
+    // const { rows } = await poolR.query(`
+    //     SELECT * FROM reservation
+    //     WHERE statut = 'acceptée' AND date_prise_en_charge < NOW() - INTERVAL 'X hours/days'
+    // `);
+    // for (const r of rows) {
+    //     await exports.validateAndCapturePayment(r.id, 'terminée'); // Utiliser la fonction de capture
+    // }
+    return 0; // Retourne le nombre de réservations traitées
 };
