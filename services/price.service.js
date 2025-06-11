@@ -65,6 +65,6 @@ exports.computePrice = dto => {
         rate      : +rate.toFixed(2),
         rateType,                      // 'day' | 'night'
         night,                          // booléen
-        price     : +(km * rate).toFixed(2),
+        price     : Math.round(km * rate),
     };
 };

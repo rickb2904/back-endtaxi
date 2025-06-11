@@ -6,3 +6,4 @@ bcrypt.hash(password, saltRounds, function(err, hash) {
     if (err) throw err;
     console.log('Mot de passe hashé :', hash);
 });
+

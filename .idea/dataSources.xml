@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="taxi_service@localhost" uuid="95d7574c-9e5a-4615-8b8f-d15b39d0aa10">
+    <data-source source="LOCAL" name="taxi_resaproject@localhost" uuid="5fa39099-fdb8-41c8-a723-979e75a2e285">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>
-      <jdbc-url>jdbc:postgresql://localhost:5432/taxi_service</jdbc-url>
+      <jdbc-url>jdbc:postgresql://localhost:5432/taxi_resaproject</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
   </component>
